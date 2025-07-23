@@ -1,0 +1,177 @@
+esphome:
+  name: my-voice-assistant
+  friendly_name: my-voice-assistant
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "your-api-encription-key"
+
+ota:
+  - platform: esphome
+    password: "your-ota-password"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "My-Voice-Assistant"
+    password: "12345678"
+
+captive_portal:
+    
+i2s_audio:
+  - id: i2s_in
+    i2s_lrclk_pin: GPIO26 #WS 
+    i2s_bclk_pin: GPIO25 #SCK
+
+microphone:
+  - platform: i2s_audio
+    adc_type: external
+    pdm: false
+    id: mic_i2s
+    channel: right
+    bits_per_sample: 32bit
+    i2s_audio_id: i2s_in
+    i2s_din_pin: GPIO33  #SD Pin from the INMP441 Microphone
+
+
+media_player:
+  - platform: i2s_audio
+    name: "esp_speaker"
+    id: media_player_speaker
+    i2s_audio_id: i2s_in
+    dac_type: external
+    i2s_dout_pin: GPIO27   #  DIN Pin of the MAX98357A Audio Amplifier
+    mode: mono
+
+
+voice_assistant:
+  microphone: mic_i2s
+  id: va
+  noise_suppression_level: 2
+  auto_gain: 31dBFS
+  volume_multiplier: 4.0
+  use_wake_word: false
+  media_player: media_player_speaker
+  
+  on_wake_word_detected: 
+    - light.turn_on:
+        id: led_light
+  on_listening: 
+    - light.turn_on:
+        id: led_light
+        effect: "Scan Effect With Custom Values"
+        red: 63%
+        green: 13%
+        blue: 93%
+  
+  on_stt_end:
+    - light.turn_on:
+        id: led_light
+        effect: "None"
+        red: 0%
+        green: 100%
+        blue: 0%
+        
+  on_error: 
+    - light.turn_on:
+        id: led_light
+        effect: "None"
+    - if:
+        condition:
+          switch.is_on: use_wake_word
+        then:
+
+          - switch.turn_off: use_wake_word
+          - delay: 1sec 
+          - switch.turn_on: use_wake_word      
+
+  on_client_connected:
+    - if:
+        condition:
+          switch.is_on: use_wake_word
+        then:
+          - voice_assistant.start_continuous:
+
+  on_client_disconnected:
+    - if:
+        condition:
+          switch.is_on: use_wake_word
+        then:
+          - voice_assistant.stop:
+ 
+  on_end:
+    - light.turn_off:
+        id: led_light
+
+
+binary_sensor:
+  - platform: status
+    name: API Connection
+    id: api_connection
+    filters:
+      - delayed_on: 1s
+    on_press:
+      - if:
+          condition:
+            switch.is_on: use_wake_word
+          then:
+            - voice_assistant.start_continuous:
+    on_release:
+      - if:
+          condition:
+            switch.is_on: use_wake_word
+          then:
+            - voice_assistant.stop:
+
+button:
+  - platform: restart
+    name: "Restart"
+    id: but_rest
+
+switch:
+  - platform: template
+    name: Use wake word
+    id: use_wake_word
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    entity_category: config
+    on_turn_on:
+      - lambda: id(va).set_use_wake_word(true);
+      - if:
+          condition:
+            not:
+              - voice_assistant.is_running
+          then:
+            - voice_assistant.start_continuous
+    
+    on_turn_off:
+      - voice_assistant.stop
+      - lambda: id(va).set_use_wake_word(false);
+
+light:
+  - platform: neopixelbus
+    id: led_light
+    type: grb
+    pin: GPIO32      # DIN pin of the LED Strip
+    num_leds: 9      # change the Number of LEDS accordign to your LED Strip.
+    name: "Light"
+    variant: ws2812x
+    default_transition_length: 0.5s
+      
+    effects:
+      - addressable_scan:
+          name: Scan Effect With Custom Values
+          move_interval: 50ms
+          scan_width: 2
